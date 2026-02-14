@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Fase 1</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet">
+
+<style>
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Pixelify Sans', sans-serif;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+canvas { display: block; }
+
+#ui {
+  position: absolute;
+  top: 15px;
+  left: 20px;
+  font-size: 26px;
+  color: white;
+  z-index: 2;
+}
+
+#winMessage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: black;
+  padding: 40px;
+  border: 5px solid gold;
+  display: none;
+  cursor: pointer;
+  z-index: 2;
+  font-size: 28px;
+}
+
+.controls {
+  position: absolute;
+  bottom: 30px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 40px;
+  z-index: 3;
+}
+
+.control-group { display: flex; gap: 35px; }
+
+.btn {
+  width: 130px;
+  height: 130px;
+  background: rgba(0,0,0,0.6);
+  border: 5px solid white;
+  color: white;
+  font-size: 50px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 25px;
+}
+</style>
+</head>
+<body>
+
+<audio id="levelMusic" src="level1.mp3" loop></audio>
+
+<div id="ui">Doces: <span id="score">0</span>/17</div>
+<div id="winMessage">VOCÊ VENCEU! Clique para voltar</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div class="controls">
+  <div class="control-group">
+    <div class="btn" id="leftBtn">◀</div>
+    <div class="btn" id="rightBtn">▶</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+const worldWidth = 100000;
+let cameraX = 0;
+let gravity = 0.7;
+let score = 0;
+
+const music = document.getElementById("levelMusic");
+let musicStarted = false;
+let audioUnlocked = false;
+
+// 🔥 DESBLOQUEIA ÁUDIO NA PRIMEIRA INTERAÇÃO
+function unlockAudio() {
+  if (!audioUnlocked) {
+    music.play().then(() => {
+      music.pause();
+      music.currentTime = 0;
+      audioUnlocked = true;
+    }).catch(()=>{});
+  }
+}
+
+document.addEventListener("click", unlockAudio, { once: true });
+document.addEventListener("touchstart", unlockAudio, { once: true });
+document.addEventListener("keydown", unlockAudio, { once: true });
+
+function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  return img;
+}
+
+const backgroundImg = loadImage("cena1_png.png");
+
+const walkSprites = [
+  loadImage("boneco_anda1.png"),
+  loadImage("boneco_anda2.png"),
+  loadImage("boneco_anda3.png"),
+  loadImage("boneco_anda4.png")
+];
+
+const idleSprite = loadImage("boneco_parado.png");
+const jumpSprite = loadImage("boneco_pula.png");
+const fallSprite = loadImage("boneco_cai.png");
+
+const candyImg = loadImage("candy.png");
+const platformImg = loadImage("plataformas.png");
+const breakPlatformImg = loadImage("plataformas_quebra.png");
+
+const player = {
+  x: 200,
+  y: 300,
+  width: 90,
+  height: 110,
+  velocityY: 0,
+  velocityX: 0,
+  onGround: false,
+  frame: 0,
+  frameTimer: 0
+};
+
+let platforms = [];
+let candies = [];
+const keys = {};
+
+function resetGame() {
+  score = 0;
+  document.getElementById("score").innerText = score;
+  document.getElementById("winMessage").style.display = "none";
+
+  player.x = 200;
+  player.y = 300;
+  player.velocityX = 0;
+  player.velocityY = 0;
+
+  platforms = [];
+  candies = [];
+  generateInitialPlatforms();
+}
+
+function createPlatform(x, y) {
+  const width = 260;
+  const height = 45;
+
+  platforms.push({
+    x,
+    y,
+    width,
+    height,
+    breakable: Math.random() < 0.25
+  });
+
+  candies.push({
+    x: x + width / 2 - 25,
+    y: y - 55,
+    width: 50,
+    height: 50,
+    collected: false
+  });
+}
+
+function generateInitialPlatforms() {
+  let x = 150;
+  let y = canvas.height - 200;
+
+  for (let i = 0; i < 8; i++) {
+    createPlatform(x, y);
+    x += 360;
+    y -= 70;
+
+    if (y < 180) y = canvas.height - 220;
+  }
+}
+
+function generateMorePlatforms() {
+  let last = platforms[platforms.length - 1];
+  let x = last.x + 360;
+  let y = last.y - 70;
+
+  if (y < 180) y = canvas.height - 220;
+
+  createPlatform(x, y);
+}
+
+function update() {
+
+  // 🔥 AGORA TOCA QUANDO ANDAR
+  if (audioUnlocked && !musicStarted && Math.abs(player.velocityX) > 0) {
+    music.play().catch(()=>{});
+    musicStarted = true;
+  }
+
+  player.velocityY += gravity;
+  player.y += player.velocityY;
+  player.x += player.velocityX;
+
+  if (player.x < 0) player.x = 0;
+
+  player.onGround = false;
+
+  platforms.forEach(p => {
+    if (
+      player.x < p.x + p.width &&
+      player.x + player.width > p.x &&
+      player.y + player.height >= p.y &&
+      player.y + player.height <= p.y + p.height + 10 &&
+      player.velocityY >= 0
+    ) {
+      player.y = p.y - player.height;
+      player.velocityY = 0;
+      player.onGround = true;
+
+      if (p.breakable) p.y += 2;
+    }
+  });
+
+  if (player.y > canvas.height + 200) {
+    resetGame();
+  }
+
+  if (player.x > platforms[platforms.length - 1].x - 1000) {
+    generateMorePlatforms();
+  }
+
+  candies.forEach(c => {
+    if (!c.collected &&
+      player.x < c.x + c.width &&
+      player.x + player.width > c.x &&
+      player.y < c.y + c.height &&
+      player.y + player.height > c.y
+    ) {
+      c.collected = true;
+      score++;
+      document.getElementById("score").innerText = score;
+
+      if (score === 17) {
+        document.getElementById("winMessage").style.display = "block";
+        localStorage.setItem("fase1Completa", "true");
+      }
+    }
+  });
+
+  cameraX = player.x - canvas.width / 2;
+  if (cameraX < 0) cameraX = 0;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  let scale = canvas.height / backgroundImg.height;
+  let bgWidth = backgroundImg.width * scale;
+
+  for (let x = -cameraX % bgWidth - bgWidth; x < canvas.width; x += bgWidth) {
+    ctx.drawImage(backgroundImg, x, 0, bgWidth, canvas.height);
+  }
+
+  platforms.forEach(p => {
+    ctx.drawImage(
+      p.breakable ? breakPlatformImg : platformImg,
+      p.x - cameraX,
+      p.y,
+      p.width,
+      p.height
+    );
+  });
+
+  candies.forEach(c => {
+    if (!c.collected)
+      ctx.drawImage(candyImg, c.x - cameraX, c.y, c.width, c.height);
+  });
+
+  let sprite = idleSprite;
+
+  if (!player.onGround) {
+    sprite = player.velocityY < 0 ? jumpSprite : fallSprite;
+  } else if (player.velocityX !== 0) {
+    player.frameTimer++;
+    if (player.frameTimer > 8) {
+      player.frame = (player.frame + 1) % 4;
+      player.frameTimer = 0;
+    }
+    sprite = walkSprites[player.frame];
+  }
+
+  ctx.drawImage(sprite, player.x - cameraX, player.y, player.width, player.height);
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight") keys.right = true;
+  if (e.key === "ArrowLeft") keys.left = true;
+  if (e.key === " " && player.onGround) player.velocityY = -18;
+});
+
+document.addEventListener("keyup", e => {
+  if (e.key === "ArrowRight") keys.right = false;
+  if (e.key === "ArrowLeft") keys.left = false;
+});
+
+function handleMovement() {
+  if (keys.right) player.velocityX = 7;
+  else if (keys.left) player.velocityX = -7;
+  else player.velocityX = 0;
+}
+
+setInterval(handleMovement, 16);
+
+canvas.addEventListener("click", () => {
+  if (player.onGround) player.velocityY = -18;
+});
+
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  if (player.onGround) player.velocityY = -18;
+});
+
+function mobileHold(btn, action) {
+  btn.addEventListener("touchstart", e => {
+    e.preventDefault();
+    action(true);
+  });
+  btn.addEventListener("touchend", e => {
+    e.preventDefault();
+    action(false);
+  });
+}
+
+mobileHold(document.getElementById("leftBtn"), state => keys.left = state);
+mobileHold(document.getElementById("rightBtn"), state => keys.right = state);
+
+document.getElementById("winMessage").onclick = function() {
+  music.pause();
+  window.location.href = "index.html";
+};
+
+generateInitialPlatforms();
+gameLoop();
+</script>
+
+</body>
+</html>
